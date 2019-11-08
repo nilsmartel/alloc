@@ -1,4 +1,4 @@
-#include "halde.h"
+#include "alloc.h"
 
 #include <errno.h>
 #include <stdint.h>
@@ -6,11 +6,13 @@
 #include <stdlib.h>
 #include <string.h>
 
-/// Magic value for occupied memory chunks.
-#define MAGIC ((void *)0xbaadf00d)
-
 /// Size of the heap (in bytes).
 #define SIZE (1024 * 1024 * 1)
+
+
+/// Heap-memory area.
+char memory[SIZE] = {0};
+
 
 /// Memory-chunk structure.
 struct mblock {
@@ -19,40 +21,8 @@ struct mblock {
   char memory[];
 };
 
-/// Heap-memory area.
-char memory[SIZE] = {0};
-
 /// Pointer to the first element of the free-memory list.
 static struct mblock *head = (struct mblock *)memory;
-
-/// Helper function to visualise the current state of the free-memory list.
-void halde_print(void) {
-  struct mblock *lauf = head;
-
-  // Empty list
-  if (head == NULL) {
-    fprintf(stderr, "(empty)\n");
-    return;
-  }
-
-  // Print each element in the list
-  fprintf(stderr, "HEAD:  ");
-  while (lauf) {
-    fprintf(stderr, "(addr: 0x%08zx, off: %7zu, ", (uintptr_t)lauf,
-            (uintptr_t)lauf - (uintptr_t)memory);
-    fflush(stderr);
-    fprintf(stderr, "size: %7zu)", lauf->size);
-    fflush(stderr);
-
-    if (lauf->next != NULL) {
-      fprintf(stderr, "\n  -->  ");
-      fflush(stderr);
-    }
-    lauf = lauf->next;
-  }
-  fprintf(stderr, "\n");
-  fflush(stderr);
-}
 
 void panic(const char *msg) {
   fprintf(stderr, "%s", msg);
@@ -71,7 +41,7 @@ size_t free_bytes_after_block(struct mblock *node) {
   return (size_t)node->next - (size_t)node->memory;
 }
 
-void *halde_malloc(size_t size) {
+void *malloc(size_t size) {
   if (size == 0)
     panic("required memory of size 0");
   // Actual amount of bytes requires mblock to be aligned with memory
@@ -101,7 +71,7 @@ void *halde_malloc(size_t size) {
   return current->memory;
 }
 
-void halde_free(void *ptr) {
+void free(void *ptr) {
   if (ptr == head->memory) {
     head->size = 0;
     return;
@@ -117,4 +87,24 @@ void halde_free(void *ptr) {
   }
 
   panic("attempt to free unallocated memory region");
+}
+
+void *realloc(void *ptr, size_t size) {
+    struct mblock *current = head;
+    while (current->memory != ptr) {
+        if (current->next == NULL) panic("tried to reallocate unallocated pointer");
+        current = current->next;
+    }
+
+    if (free_bytes_after_block(current) <= size) {
+        current->size = size;
+        return current;
+    }
+
+    struct mblock *new = malloc(size);
+
+    memcpy(current->memory, new, current->size);
+    free(current->memory);
+
+    return new;
 }
