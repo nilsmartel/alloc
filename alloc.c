@@ -24,34 +24,29 @@ struct mblock {
 /// Pointer to the first element of the free-memory list.
 static struct mblock *head = (struct mblock *)memory;
 
-void panic(const char *msg) {
-  fprintf(stderr, "%s", msg);
-  exit(0);
-}
-
-struct mblock empty_block() {
-  struct mblock block = {NULL, 0};
-  return block;
-}
-
-size_t free_bytes_after_block(struct mblock *node) {
+size_t bytes_after_block(struct mblock *node) {
   if (node->next == NULL)
-    return SIZE - (size_t)node->memory;
+    return SIZE - ((size_t)node->memory - (size_t)memory);
 
   return (size_t)node->next - (size_t)node->memory;
 }
 
 void *malloc(size_t size) {
-  if (size == 0)
-    panic("required memory of size 0");
+  if (size == 0) {
+    return NULL;
+  }
+
   // Actual amount of bytes requires mblock to be aligned with memory
   size_t required_size = size + sizeof(struct mblock);
 
   struct mblock *current = head;
 
-  while (free_bytes_after_block(current) < required_size) {
-    if (current->next == NULL)
-      panic("no memory left");
+  while (bytes_after_block(current) < required_size) {
+    if (current->next == NULL) {
+      printf("No memory available");
+      errno = ENOMEM;
+      return NULL;
+    }
 
     current = current->next;
   }
@@ -65,46 +60,36 @@ void *malloc(size_t size) {
     node->size = size;
     return node->memory;
   }
-  current->size = size;
-  current->next = (struct mblock *)(current->memory + size);
-  current->next[0] = empty_block();
-  return current->memory;
+
+  current->next = (struct mblock *)((size_t)current->memory + current->size);
+  struct mblock *node = current->next;
+  node->next = NULL;
+  node->size = size;
+
+  return node->memory;
 }
 
 void free(void *ptr) {
-  if (ptr == head->memory) {
-    head->size = 0;
-    return;
-  }
-
-  struct mblock *current = head;
-
-  while (current->next != NULL) {
-    if (current->next->memory == ptr) {
-        current->next = current->next->next;
+    if (!ptr) {
         return;
     }
-  }
 
-  panic("attempt to free unallocated memory region");
-}
+    struct mblock* last = head;
+    struct mblock* current = head;
 
-void *realloc(void *ptr, size_t size) {
-    struct mblock *current = head;
-    while (current->memory != ptr) {
-        if (current->next == NULL) panic("tried to reallocate unallocated pointer");
+    while (ptr != current->memory) {
+        // the current mblock is _not_ the one we want to free
+
+        if (current->next == NULL) {
+            // No follow up mblock, the pointer is invalid
+            abort();
+        }
+        last = current;
         current = current->next;
     }
 
-    if (free_bytes_after_block(current) <= size) {
-        current->size = size;
-        return current;
-    }
+    // we now have the mblock to be freed in `current`
+    last->next = current->next;
 
-    struct mblock *new = malloc(size);
-
-    memcpy(current->memory, new, current->size);
-    free(current->memory);
-
-    return new;
+    if (last->size==0) last->next = NULL;
 }
